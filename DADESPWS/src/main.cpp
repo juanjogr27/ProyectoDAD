@@ -2,6 +2,18 @@
 #include "ArduinoJson.h"
 #include <WiFiUdp.h>
 #include <PubSubClient.h>
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
+
+#define DHTPIN1 26     // El pin al que está conectado el sensor
+#define DHTTYPE DHT11 // Tipo de sensor DHT que estás utilizando
+DHT dht1(DHTPIN1, DHTTYPE);
+
+const int RelayPin = 27;
+bool isRelayOn = false;
+
+//#define DHTPIN2 25     // El pin al que está conectado el sensor
+//DHT dht2(DHTPIN2, DHTTYPE);
 
 // Replace 0 by ID of this current device
 const int DEVICE_ID = 124;
@@ -10,7 +22,7 @@ int test_delay = 1000; // so we don't spam the API
 boolean describe_tests = true;
 
 // Replace 0.0.0.0 by your server local IP (ipconfig [windows] or ifconfig [Linux o MacOS] gets IP assigned to your PC)
-String serverName = "http://192.168.178.96:8081/";
+String serverName = "http://192.168.156.96:8081/";
 HTTPClient http;
 
 // Replace WifiName and WifiPassword by your WiFi credentials
@@ -22,7 +34,7 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 
 // Server IP, where de MQTT broker is deployed
-const char *MQTT_BROKER_ADRESS = "localhost";
+const char *MQTT_BROKER_ADRESS = "192.168.156.96";
 const uint16_t MQTT_PORT = 1883;
 
 // Name for this MQTT client
@@ -30,19 +42,32 @@ const char *MQTT_CLIENT_NAME = "ArduinoClient_1";
 
 // callback a ejecutar cuando se recibe un mensaje
 // en este ejemplo, muestra por serial el mensaje recibido
-void OnMqttReceived(char *topic, byte *payload, unsigned int length)
-{
+void OnMqttReceived(char *topic, byte *payload, unsigned int length) {
   Serial.print("Received on ");
-  Serial.print(topic);
+  Serial.print("1");
   Serial.print(": ");
 
   String content = "";
-  for (size_t i = 0; i < length; i++)
-  {
+  for (size_t i = 0; i < length; i++) {
     content.concat((char)payload[i]);
   }
   Serial.print(content);
   Serial.println();
+
+  // Comprueba si el mensaje es "ON" o "OFF"
+  
+  if (content.equalsIgnoreCase("ON")) {
+    // Enciende el relé
+    digitalWrite(RelayPin, HIGH);
+    Serial.println("Relé encendido");
+    isRelayOn = true;
+  } else if (content.equalsIgnoreCase("OFF")) {
+    // Apaga el relé
+    digitalWrite(RelayPin, LOW);
+    Serial.println("Relé apagado");
+    isRelayOn = false;
+  }
+  
 }
 
 // inicia la comunicacion MQTT
@@ -60,6 +85,12 @@ void InitMqtt()
 void setup()
 {
   Serial.begin(9600);
+  dht1.begin();
+   // Configura el pin del relé como salida
+  pinMode(RelayPin, OUTPUT);
+  // Inicialmente apaga el relé
+  digitalWrite(RelayPin, LOW);
+  //dht2.begin();
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(STASSID);
@@ -91,10 +122,12 @@ void setup()
 void ConnectMqtt()
 {
   Serial.print("Starting MQTT connection...");
+
+  
   if (client.connect(MQTT_CLIENT_NAME))
   {
-    client.subscribe("hello/world");
-    client.publish("hello/world", "connected");
+    client.subscribe("1");
+    //client.publish("hello/world", "connected");
   }
   else
   {
@@ -121,12 +154,15 @@ void HandleMqtt()
 
 String response;
 
-String serializeSensorValueBody(int idSensors, long timeStamp, int temperatura, boolean isBedroom, int idPlaca, int idGroup)
+String serializeSensorValueBody(int idSensors, long timeStamp, int temperatura, int idPlaca, int idGroup)
 {
   // StaticJsonObject allocates memory on the stack, it can be
   // replaced by DynamicJsonDocument which allocates in the heap.
   //
   DynamicJsonDocument doc(2048);
+
+  // Derive isBedroom based on idPlaca
+  bool isBedroom = (idPlaca % 2 == 0) ? false : true; // isBedroom es false si idPlaca es par, true si es impar
 
   // Add values in the document
   //
@@ -243,29 +279,33 @@ void describe(char *description)
 
 void POST_tests()
 {
-  String actuator_states_body = serializeActuatorStatusBody(33, millis(), false, 1, 1);
-  describe("Test POST with actuator state");
+  String actuator_states_body = serializeActuatorStatusBody(1, millis(), isRelayOn, 1, 1);
+  describe("POST actuador");
   String serverPath = serverName + "api/actuators";
   http.begin(serverPath.c_str());
   test_response(http.POST(actuator_states_body));
 
-  String sensor_value_body = serializeSensorValueBody(33, millis(), random(20, 40), false, 2, 1);
-  describe("Test POST with sensor value");
+
+
+  float temperatura1 = dht1.readTemperature();
+  //float temperatura2 = dht2.readTemperature();
+  String sensor_value_body1 = serializeSensorValueBody(1, millis(), temperatura1, 1, 1);
+  //String sensor_value_body2 = serializeSensorValueBody(2, millis(), temperatura2, 2, 1);
+  
+ /*
+ String sensor_value_body1 = serializeSensorValueBody(1, millis(), random(20,40), 1, 1);
+  String sensor_value_body2 = serializeSensorValueBody(2, millis(), random(20,40), 2, 1);
+  */
+  describe("POST sensor");
   serverPath = serverName + "api/sensors";
   http.begin(serverPath.c_str());
-  test_response(http.POST(sensor_value_body));
-
-  // String device_body = serializeDeviceBody(String(DEVICE_ID), ("Name_" + String(DEVICE_ID)).c_str(), ("mqtt_" + String(DEVICE_ID)).c_str(), 12);
-  // describe("Test POST with path and body and response");
-  // serverPath = serverName + "api/device";
-  // http.begin(serverPath.c_str());
-  // test_response(http.POST(actuator_states_body));
+  test_response(http.POST(sensor_value_body1));
+  //test_response(http.POST(sensor_value_body2));
 }
 
 // Run the tests!
 void loop()
 {
-  //GET_tests();
   POST_tests();
   HandleMqtt();
 }
