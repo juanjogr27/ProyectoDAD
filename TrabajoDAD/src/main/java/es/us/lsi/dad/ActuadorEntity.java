@@ -17,6 +17,7 @@ public class ActuadorEntity {
 		this.idGroup = idGroup;
 	}
 
+
 	public ActuadorEntity() {
 		super();
 		// TODO Auto-generated constructor stub
